@@ -31,6 +31,9 @@
 
 ;;; Code:
 
+(eval-when-compile
+  (require 'pcase))
+
 (defun opam-env ()
   "Get the OPAM environment.
 
