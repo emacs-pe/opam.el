@@ -6,7 +6,7 @@
 ;; URL: https://github.com/lunaryorn/opam.el
 ;; Keywords: convenience
 ;; Version: 0.1-cvs
-;; Package-Requires: ((emacs "24.1"))
+;; Package-Requires: ((emacs "24.3"))
 
 ;; This file is not part of GNU Emacs.
 
@@ -32,7 +32,126 @@
 ;;; Code:
 
 (eval-when-compile
-  (require 'pcase))
+  (require 'pcase)
+  (require 'cl-lib))
+
+(eval-and-compile
+  (defconst opam-rx-constituents
+    `((entry  . ,(rx alnum (+ (in alnum "." "+" "-"))))
+      (status . ,(rx (in ?I ?C)))))
+
+  (defmacro opam-rx (&rest regexps)
+    "Opan mode specialized rx macro.
+
+This variant of `rx' supports common opam named REGEXPS."
+    (let ((rx-constituents (append opam-rx-constituents rx-constituents)))
+      (cond ((null regexps)
+             (error "No regexp"))
+            ((cdr regexps)
+             (rx-to-string `(and ,@regexps) t))
+            (t
+             (rx-to-string (car regexps) t))))))
+
+(defconst opam-switch-entry-regexp
+  (opam-rx line-start
+           (group (or entry "--"))
+           (+ space)
+           (group (or status "--"))
+           (+ space)
+           (group (or entry "--"))
+           (+ space)
+           (group (one-or-more not-newline))
+           line-end)
+  "Regexp for opam switch list entries.")
+
+(cl-defstruct (opam-switch (:constructor opam-switch-new)
+                           (:type vector))
+  "A structure holding all the information of an Opam switch compiler."
+  name                                  ; Switch name
+  state                                 ; Switch state
+  compiler                              ; Compiler name
+  description                           ; Compiler Description
+  )
+
+;; Shamelessly stolen from: https://github.com/magnars/s.el/blob/fc395c8/s.el#L445-L462
+(defun opam-regexp-match (regexp string &optional start)
+  "Retrieve the match of REGEXP against a matching STRING.
+
+Behaves like JavaScript's String.prototype.match.  When the given
+expression matches the string, this function returns a list of
+the whole matching string and a string for each matched
+sub-expressions.  If it did not match the returned value is an
+empty list (nil).
+
+When START is non-nil the search will start at that index."
+  (save-match-data
+    (if (string-match regexp string start)
+        (let ((match-data-list (match-data))
+              result)
+          (while match-data-list
+            (let* ((beg (car match-data-list))
+                   (end (cadr match-data-list))
+                   (subs (if (and beg end) (substring string beg end) nil)))
+              (setq result (cons subs result))
+              (setq match-data-list
+                    (cddr match-data-list))))
+          (nreverse result)))))
+
+(defun opam-switch-parse-output (output)
+  "Parse OUTPUT of opam switch list."
+  (cl-loop for line in (split-string output "\n" 'omit-nulls)
+           when (opam-regexp-match opam-switch-entry-regexp line)
+           collect (cl-multiple-value-bind (_match name state compiler description) it
+                     (opam-switch-new :name name :state state :compiler compiler :description description))))
+
+(defun opam-quote-command (command &rest args)
+  "Quote COMMAND and ARGS."
+  (mapconcat #'shell-quote-argument (cons command args) " "))
+
+(defun opam-exec-insert (program &rest args)
+  "Execute PROGRAM with ARGS, inserting its output at point."
+  (apply #'process-file program nil (list t nil) nil args))
+
+(defun opam-list-switch (&optional all)
+  "Return a list of opam switch.  If ALL is non-nil return all switch available."
+  (with-temp-buffer
+    (apply #'opam-exec-insert "opam" "switch" "list" (and all '("--all")))
+    (opam-switch-parse-output (buffer-string))))
+
+(defun opam-switch-list-entries ()
+  "Return a tabulated list entries."
+  (cl-loop for switch in (opam-list-switch 'all)
+           collect (list (opam-switch-compiler switch) switch)))
+
+(defun opam-switch (name)
+  "Call opam switch NAME."
+  (interactive)
+  (cl-labels ((opam-reload-env (&rest _) (opam-init))
+              (update-start-hook (&rest _)
+                                 (setq compilation-finish-functions
+                                       (cons #'opam-reload-env compilation-finish-functions))))
+    (let ((compilation-start-hook (cons #'update-start-hook compilation-start-hook)))
+      (compilation-start (opam-quote-command "opam" "switch" name)))))
+
+(define-derived-mode opam-switch-list-mode tabulated-list-mode "opam-switch"
+  "List available nix packages.
+
+\\{opam-switch-list-mode-map}"
+  (setq tabulated-list-padding 2
+        tabulated-list-entries 'opam-switch-list-entries
+        tabulated-list-format [("name" 30 t :read-only t)
+                               ("state" 7 t :read-only t)
+                               ("compiler" 30 t :read-only t)
+                               ("description" 60 t :read-only t)])
+  (tabulated-list-init-header))
+
+(defun opam-switch-list ()
+  "List of available opam switch."
+  (interactive)
+  (with-current-buffer (get-buffer-create "*opam switch*")
+    (opam-switch-list-mode)
+    (tabulated-list-print)
+    (pop-to-buffer (current-buffer))))
 
 (defun opam-env ()
   "Get the OPAM environment.
