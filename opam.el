@@ -128,16 +128,27 @@ When START is non-nil the search will start at that index."
   (or (and (not arg) (derived-mode-p 'opam-switch-list-mode) (tabulated-list-get-id))
       (completing-read "Switch compiler: " (mapcar #'opam-switch-compiler (opam-list-switch arg)) nil t)))
 
+(defun opam-switch-list-reload ()
+  "Revert opam switch list view."
+  (let ((buffer (get-buffer "*opam switch*")))
+    (and buffer (with-current-buffer buffer (revert-buffer)))))
+
 ;;;###autoload
 (defun opam-switch (name)
   "Call opam switch NAME."
   (interactive (list (opam-switch-read-compiler current-prefix-arg)))
-  (cl-labels ((opam-reload-env (&rest _) (opam-init))
+  (cl-labels ((opam-reload-env (&rest _) (opam-init) (opam-switch-list-reload))
               (update-start-hook (&rest _)
-                                 (setq compilation-finish-functions
-                                       (cons #'opam-reload-env compilation-finish-functions))))
+                                 (setq-local compilation-finish-functions (cons #'opam-reload-env compilation-finish-functions))))
     (let ((compilation-start-hook (cons #'update-start-hook compilation-start-hook)))
       (compilation-start (opam-quote-command "opam" "switch" name)))))
+
+(defvar opam-switch-list-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map tabulated-list-mode-map)
+    (define-key map "s" 'opam-switch)
+    map)
+  "Local keymap for `opam-switch-list-mode' buffers.")
 
 (define-derived-mode opam-switch-list-mode tabulated-list-mode "opam-switch"
   "List available nix packages.
