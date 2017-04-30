@@ -123,9 +123,15 @@ When START is non-nil the search will start at that index."
   (cl-loop for switch in (opam-list-switch 'all)
            collect (list (opam-switch-compiler switch) switch)))
 
+(defun opam-switch-read-compiler (&optional arg)
+  "Read ocaml switch compiler, if ARG is non-nil will read all compilers."
+  (or (and (not arg) (derived-mode-p 'opam-switch-list-mode) (tabulated-list-get-id))
+      (completing-read "Switch compiler: " (mapcar #'opam-switch-compiler (opam-list-switch arg)) nil t)))
+
+;;;###autoload
 (defun opam-switch (name)
   "Call opam switch NAME."
-  (interactive)
+  (interactive (list (opam-switch-read-compiler current-prefix-arg)))
   (cl-labels ((opam-reload-env (&rest _) (opam-init))
               (update-start-hook (&rest _)
                                  (setq compilation-finish-functions
@@ -137,14 +143,16 @@ When START is non-nil the search will start at that index."
   "List available nix packages.
 
 \\{opam-switch-list-mode-map}"
-  (setq tabulated-list-padding 2
-        tabulated-list-entries 'opam-switch-list-entries
-        tabulated-list-format [("name" 30 t :read-only t)
+  (setq tabulated-list-format [("name" 30 t :read-only t)
                                ("state" 7 t :read-only t)
                                ("compiler" 30 t :read-only t)
-                               ("description" 60 t :read-only t)])
+                               ("description" 60 t :read-only t)]
+        tabulated-list-padding 2
+        tabulated-list-entries 'opam-switch-list-entries
+        tabulated-list-sort-key '("state" . t))
   (tabulated-list-init-header))
 
+;;;###autoload
 (defun opam-switch-list ()
   "List of available opam switch."
   (interactive)
